@@ -25,6 +25,8 @@ import com.badlogic.gdx.physics.box2d.CircleShape;
 import com.badlogic.gdx.physics.box2d.EdgeShape;
 import com.badlogic.gdx.physics.box2d.Filter;
 import com.badlogic.gdx.physics.box2d.FixtureDef;
+import com.badlogic.gdx.physics.box2d.Joint;
+import com.badlogic.gdx.physics.box2d.JointEdge;
 import com.badlogic.gdx.physics.box2d.PolygonShape;
 import com.badlogic.gdx.physics.box2d.World;
 import com.badlogic.gdx.physics.box2d.joints.RevoluteJoint;
@@ -36,11 +38,13 @@ import com.badlogic.gdx.utils.Array;
 public class GeneticsMain extends ApplicationAdapter {
 	SpriteBatch batch;
 	ArrayList<Body> bars = new ArrayList<Body>();
-	ArrayList<CarGene> cars;
+	ArrayList<CarGene> cars = new ArrayList<CarGene>();
 	OrthographicCamera cam;
 	World world = new World(new Vector2(0, -9.4f), true);
 	Box2DDebugRenderer debugRenderer;
 	static Random rand = new Random();
+	Vector2 beginPos;
+	Vector2 vertex = Vector2.Zero;
 
 	public Body createCarFromGene(CarGene gene, int x, int y) {
 		Vector2[] offsets = new Vector2[gene.numVerts];
@@ -85,6 +89,7 @@ public class GeneticsMain extends ApplicationAdapter {
 			axisDef.bodyA = carBody;
 			axisDef.bodyB = wheelBody;
 			axisDef.collideConnected = false;
+			System.out.println(gene.wheelVerts[i] + " : " + gene.numVerts + " : " + gene.numWheels);
 			axisDef.localAnchorA.set(offsets[gene.wheelVerts[i]]);
 			axisDef.localAnchorB.set(0, 0);
 			axisDef.enableMotor = gene.wheelIsMotor[i];
@@ -97,10 +102,89 @@ public class GeneticsMain extends ApplicationAdapter {
 		return carBody;
 	}
 
-	public void triggerBreed() {
-		
+	public static void sort(CarGene[] array) {
+		CarGene temp;
+		for (int i = 0; i < array.length - 1; i++) {
+			if (array[i].chassis.getPosition().x > array[i + 1].chassis.getPosition().x) {
+				temp = array[i];
+				array[i] = array[i + 1];
+				array[i + 1] = temp;
+				i = -1;
+			}
+		}
 	}
-	
+
+	float farthestLength;
+
+	public void triggerBreed() {
+		CarGene[] c = new CarGene[cars.size()];
+
+		sort(cars.toArray(c));
+
+		float totalFitness = 0;
+
+		for (int i = c.length - 1; i >= 0; i--) {
+			float fitness = (float) Math.pow(beginPos.x - c[i].chassis.getWorldCenter().x, 2);
+
+			if (fitness <= 0) {
+				c[i].fitness = -1;
+				continue;
+			}
+
+			totalFitness += fitness;
+			c[i].fitness = fitness;
+		}
+
+		ArrayList<CarGene> choices = new ArrayList<CarGene>();
+
+		for (int i = 0; i < c.length; i++) {
+			if (c[i].fitness == -1)
+				continue;
+
+			int numEntries = Math.round((c[i].fitness / totalFitness) * 1000);
+
+			for (int j = 0; j < numEntries && choices.size() < 1000; j++) {
+				choices.add(c[i]);
+			}
+		}
+
+		CarGene[] production = new CarGene[cars.size()];
+
+		CarGene one, two;
+
+		for (int i = 0; i < production.length; i++) {
+			one = choices.get(randInt(0, choices.size() - 1));
+			do {
+				two = choices.get(randInt(0, choices.size() - 1));
+			} while (one == two);
+
+			production[i] = one.breed(two);
+		}
+
+		Array<Body> bodies = new Array<Body>();
+		world.getBodies(bodies);
+		for (int i = 0; i < bodies.size; i++) {
+			if (!world.isLocked() && bodies.get(i).getType() == BodyType.DynamicBody)
+				world.destroyBody(bodies.get(i));
+		}
+
+		int pastSize = cars.size();
+		cars.clear();
+
+		for (int i = 0; i < pastSize - (pastSize / 4); i++) {
+			cars.add(production[i]);
+			createCarFromGene(production[i], (int) vertex.x - 50, (int) vertex.y + 50);
+		}
+
+		for (int i = 0; i < pastSize / 4; i++) {
+			if (i < cars.size()) {
+				CarGene gene = CarGene.genRandomCar();
+				cars.add(gene);
+				createCarFromGene(gene, (int) vertex.x - 50, (int) vertex.y + 50);
+			}
+		}
+	}
+
 	@Override
 	public void create() {
 		Box2D.init();
@@ -114,7 +198,6 @@ public class GeneticsMain extends ApplicationAdapter {
 
 		BodyDef groundBodyDef = new BodyDef();
 		EdgeShape edgeShape = new EdgeShape();
-		Vector2 vertex = Vector2.Zero;
 		Body groundBody = null;
 		int lastX = 0;
 
@@ -138,7 +221,6 @@ public class GeneticsMain extends ApplicationAdapter {
 			int factor = (int) (0.6f * (numBars - i));
 
 			groundBodyDef.position.set(pos);
-			System.out.println(i + " : " + factor);
 			groundBodyDef.angle = randInt(-30 - factor, 30 + factor) * MathUtils.degreesToRadians;
 			groundBody = world.createBody(groundBodyDef);
 			edgeShape.set(0, 0, width, 0);
@@ -150,6 +232,7 @@ public class GeneticsMain extends ApplicationAdapter {
 			groundBody.getWorldPoint(vertex);
 
 			cam.position.set(new Vector3(pos.x, pos.y, 1));
+			beginPos = pos;
 
 			bars.add(groundBody);
 		}
@@ -182,7 +265,7 @@ public class GeneticsMain extends ApplicationAdapter {
 		batch.setProjectionMatrix(cam.combined);
 		batch.begin();
 		batch.end();
-		
+
 		debugRenderer.render(world, cam.combined);
 		world.step(1 / 60f, 6, 2);
 	}
@@ -216,7 +299,7 @@ public class GeneticsMain extends ApplicationAdapter {
 		if (Gdx.input.isKeyPressed(Input.Keys.W)) {
 			cam.translate(0, 9, 0);
 		}
-		if (Gdx.input.isKeyPressed(Input.Keys.B)) {
+		if (Gdx.input.isKeyJustPressed(Input.Keys.B)) {
 			triggerBreed();
 		}
 	}
@@ -243,6 +326,7 @@ public class GeneticsMain extends ApplicationAdapter {
 		int[] wheelRadii;
 		int[] wheelSpeed;
 		boolean[] wheelIsMotor;
+		float fitness;
 		Body chassis;
 
 		public CarGene(int numVerts, int[] vertRadii, int numWheels, int[] wheelVerts, int[] wheelRadii,
@@ -261,11 +345,11 @@ public class GeneticsMain extends ApplicationAdapter {
 			int[] newVertRadii = new int[newNumVerts];
 
 			for (int i = 0; i < newNumVerts; i++) {
-				if (i == mate.numVerts)
+				if (i >= mate.numVerts)
 					newVertRadii[i] = vertRadii[i];
-				else if (i == numVerts)
+				else if (i >= numVerts)
 					newVertRadii[i] = mate.vertRadii[i];
-				else
+				else if (i < numVerts && i < mate.numVerts)
 					newVertRadii[i] = (mate.vertRadii[i] + vertRadii[i]) / 2;
 			}
 
@@ -279,28 +363,57 @@ public class GeneticsMain extends ApplicationAdapter {
 			boolean[] newWheelIsMotor = new boolean[newNumWheels];
 
 			for (int i = 0; i < newNumWheels; i++) {
-				if (i == mate.numWheels) {
+				if (i >= mate.numWheels) {
 					newWheelRadii[i] = wheelRadii[i];
 					newWheelSpeed[i] = wheelSpeed[i];
 					newWheelIsMotor[i] = wheelIsMotor[i];
-				} else if (i == numVerts) {
+				} else if (i >= numVerts) {
 					newWheelRadii[i] = mate.wheelRadii[i];
 					newWheelSpeed[i] = mate.wheelSpeed[i];
 					newWheelIsMotor[i] = mate.wheelIsMotor[i];
-				} else {
+				} else if (i < mate.numWheels && i < numWheels) {
 					newWheelRadii[i] = (mate.wheelRadii[i] + wheelRadii[i]) / 2;
 					newWheelSpeed[i] = (mate.wheelSpeed[i] + wheelSpeed[i]) / 2;
 					newWheelIsMotor[i] = mate.wheelIsMotor[i] || wheelIsMotor[i];
 				}
 			}
 
-			int[] newWheelVerts = wheelVerts;
+			int[] newWheelVerts = new int[10];
+			boolean filledWithMate = rand.nextBoolean();
 
-			if (rand.nextBoolean())
-				newWheelVerts = mate.wheelVerts;
+			if (filledWithMate) {
+				for (int i = 0; i < mate.wheelVerts.length; i++)
+					newWheelVerts[i] = mate.wheelVerts[i];
+			} else {
+				for (int i = 0; i < wheelVerts.length; i++)
+					newWheelVerts[i] = wheelVerts[i];
+			}
 
-			return new CarGene(newNumVerts, newVertRadii, newNumWheels, newWheelVerts, newWheelRadii, newWheelSpeed,
-					newWheelIsMotor);
+			ArrayList<Integer> finalNewWheelVerts = new ArrayList<Integer>();
+			int vert;
+
+			int tries = 0;
+
+			for (int i = filledWithMate ? mate.wheelVerts.length : wheelVerts.length; i < newWheelVerts.length
+					- (filledWithMate ? mate.wheelVerts.length : wheelVerts.length); i++) {
+				do {
+					vert = randInt(0, newNumVerts - 1);
+				} while (finalNewWheelVerts.contains(vert) && tries++ < 10);
+
+				if (tries >= 9)
+					vert = 0;
+				tries = 0;
+
+				finalNewWheelVerts.add(vert);
+			}
+
+			int[] superFinalNewWheelVerts = new int[finalNewWheelVerts.size()];
+			for (int i = 0; i < finalNewWheelVerts.size(); i++) {
+				superFinalNewWheelVerts[i] = finalNewWheelVerts.get(i);
+			}
+
+			return new CarGene(newNumVerts, newVertRadii, newNumWheels, superFinalNewWheelVerts, newWheelRadii,
+					newWheelSpeed, newWheelIsMotor);
 		}
 
 		/*
