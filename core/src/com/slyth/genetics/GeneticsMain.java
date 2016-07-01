@@ -15,6 +15,7 @@ import com.badlogic.gdx.graphics.glutils.ShapeRenderer.ShapeType;
 import com.badlogic.gdx.math.Intersector;
 import com.badlogic.gdx.math.MathUtils;
 import com.badlogic.gdx.math.Vector2;
+import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.physics.box2d.Body;
 import com.badlogic.gdx.physics.box2d.BodyDef;
 import com.badlogic.gdx.physics.box2d.BodyDef.BodyType;
@@ -35,8 +36,9 @@ import com.badlogic.gdx.utils.Array;
 public class GeneticsMain extends ApplicationAdapter {
 	SpriteBatch batch;
 	ArrayList<Body> bars = new ArrayList<Body>();
+	ArrayList<CarGene> cars;
 	OrthographicCamera cam;
-	World world = new World(new Vector2(0, -10), true);
+	World world = new World(new Vector2(0, -9.4f), true);
 	Box2DDebugRenderer debugRenderer;
 	static Random rand = new Random();
 
@@ -60,6 +62,8 @@ public class GeneticsMain extends ApplicationAdapter {
 		BodyDef bodyDef = new BodyDef();
 		bodyDef.position.set(x, y);
 		bodyDef.type = BodyType.DynamicBody;
+		bodyDef.gravityScale = 2.5f;
+		bodyDef.linearDamping = 0.0f;
 		Body carBody = world.createBody(bodyDef);
 		carBody.createFixture(shape, 10.0f);
 		carBody.getFixtureList().get(0).setFilterData(f);
@@ -89,9 +93,14 @@ public class GeneticsMain extends ApplicationAdapter {
 			RevoluteJoint axis = (RevoluteJoint) world.createJoint(axisDef);
 		}
 
+		gene.chassis = carBody;
 		return carBody;
 	}
 
+	public void triggerBreed() {
+		
+	}
+	
 	@Override
 	public void create() {
 		Box2D.init();
@@ -131,21 +140,23 @@ public class GeneticsMain extends ApplicationAdapter {
 			groundBodyDef.position.set(pos);
 			System.out.println(i + " : " + factor);
 			groundBodyDef.angle = randInt(-30 - factor, 30 + factor) * MathUtils.degreesToRadians;
-			groundBodyDef.gravityScale = 4.0f;
 			groundBody = world.createBody(groundBodyDef);
 			edgeShape.set(0, 0, width, 0);
 			groundBody.createFixture(edgeShape, 0.0f);
 			groundBody.getFixtureList().get(0).setFriction(1f);
-			
+
 			edgeShape.getVertex2(vertex);
 			groundBody.getTransform().mul(vertex);
 			groundBody.getWorldPoint(vertex);
+
+			cam.position.set(new Vector3(pos.x, pos.y, 1));
 
 			bars.add(groundBody);
 		}
 
 		for (int i = 0; i < 30; i++) {
 			CarGene gene = CarGene.genRandomCar();
+			cars.add(gene);
 			createCarFromGene(gene, (int) vertex.x - 50, (int) vertex.y + 50);
 		}
 
@@ -171,7 +182,7 @@ public class GeneticsMain extends ApplicationAdapter {
 		batch.setProjectionMatrix(cam.combined);
 		batch.begin();
 		batch.end();
-
+		
 		debugRenderer.render(world, cam.combined);
 		world.step(1 / 60f, 6, 2);
 	}
@@ -205,6 +216,9 @@ public class GeneticsMain extends ApplicationAdapter {
 		if (Gdx.input.isKeyPressed(Input.Keys.W)) {
 			cam.translate(0, 9, 0);
 		}
+		if (Gdx.input.isKeyPressed(Input.Keys.B)) {
+			triggerBreed();
+		}
 	}
 
 	static class Car {
@@ -229,6 +243,7 @@ public class GeneticsMain extends ApplicationAdapter {
 		int[] wheelRadii;
 		int[] wheelSpeed;
 		boolean[] wheelIsMotor;
+		Body chassis;
 
 		public CarGene(int numVerts, int[] vertRadii, int numWheels, int[] wheelVerts, int[] wheelRadii,
 				int[] wheelSpeed, boolean[] wheelIsMotor) {
@@ -279,7 +294,13 @@ public class GeneticsMain extends ApplicationAdapter {
 				}
 			}
 
-			return null;//new CarGene(newNumVerts, newVertRadii, newNumWheels, newWheelVerts, newWheelRadii, newWheelSpeed, newWheelIsMotor);
+			int[] newWheelVerts = wheelVerts;
+
+			if (rand.nextBoolean())
+				newWheelVerts = mate.wheelVerts;
+
+			return new CarGene(newNumVerts, newVertRadii, newNumWheels, newWheelVerts, newWheelRadii, newWheelSpeed,
+					newWheelIsMotor);
 		}
 
 		/*
